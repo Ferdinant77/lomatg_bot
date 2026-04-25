@@ -4,7 +4,6 @@
 import logging
 import sqlite3
 import sys
-import os
 from typing import Dict, List, Tuple, Optional
 from io import BytesIO
 
@@ -21,11 +20,8 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 
 # ==================== НАСТРОЙКИ ====================
-TOKEN = os.getenv(" 8701551061:AAFNGmlPf4jHC_voQ8rTLbiqLP1VcwqK3SQ")
-if not TOKEN:
-    raise ValueError("❌ Переменная окружения  8701551061:AAFNGmlPf4jHC_voQ8rTLbiqLP1VcwqK3SQ не установлена!")
-
-SUPER_ADMIN_IDS = [923942388]  # Ваш ID
+TOKEN = "8701551061:AAFNGmlPf4jHC_voQ8rTLbiqLP1VcwqK3SQ"
+SUPER_ADMIN_IDS = [923942388]
 DB_NAME = "poll_bot.db"
 
 NO_ACTIVE_POLL_MSG = "❌ Нет активного опроса."
@@ -293,11 +289,21 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if is_super_admin(user_id):
         keyboard.append([InlineKeyboardButton("👥 Управление админами", callback_data="menu_admins")])
     reply_markup = InlineKeyboardMarkup(keyboard)
-    text = "🏠 *Главное меню*\nВыберите действие:"
+
+    # Если вызов из callback_query (например, кнопка "Назад"), то редактируем существующее сообщение
     if update.callback_query:
-        await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await update.callback_query.message.edit_text(
+            "🏠 *Главное меню*\nВыберите действие:",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+    # Иначе отправляем новое сообщение
     else:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await update.message.reply_text(
+            "🏠 *Главное меню*\nВыберите действие:",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
 
 async def show_admins_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     keyboard = [
@@ -343,7 +349,7 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             f"🔹 Отдано голосов: {vote_count}")
     await update.message.reply_text(text, parse_mode="Markdown")
 
-# ==================== ОСНОВНЫЕ ОБРАБОТЧИКИ ====================
+# ==================== ОБРАБОТЧИКИ КОМАНД ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     args = context.args
@@ -598,7 +604,7 @@ async def close_poll_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     close_poll(poll["id"])
     await update.message.reply_text(f"🔒 Опрос «{poll['question']}» закрыт.")
 
-# ---------- КНОПОЧНЫЕ ОБРАБОТЧИКИ ----------
+# ---------- ДОБАВЛЕНИЕ СВОЕГО ВАРИАНТА ----------
 async def add_custom_option_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -616,6 +622,7 @@ async def add_custom_option_callback(update: Update, context: ContextTypes.DEFAU
             "Для отмены отправьте /cancel"
         )
 
+# ---------- ОБРАБОТЧИК КНОПОК ----------
 async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -761,7 +768,7 @@ def main():
     app.add_handler(CallbackQueryHandler(add_custom_option_callback, pattern="^add_option_"))
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    logger.info("🚀 Бот успешно запущен с QR‑кодом!")
+    logger.info("🚀 Бот успешно запущен с QR‑кодом и меню!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
@@ -772,8 +779,3 @@ if __name__ == "__main__":
     except Exception as e:
         logger.critical(f"Критическая ошибка: {e}")
         sys.exit(1)
-        
-        
-        
-       
-        
