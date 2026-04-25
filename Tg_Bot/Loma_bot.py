@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import os
 import logging
 import sqlite3
 import sys
 from typing import Dict, List, Tuple, Optional
-from io import BytesIO
 
-import qrcode
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -20,8 +19,11 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 
 # ==================== НАСТРОЙКИ ====================
-TOKEN = "8701551061:AAFNGmlPf4jHC_voQ8rTLbiqLP1VcwqK3SQ"
-SUPER_ADMIN_IDS = [923942388]
+TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("❌ Переменная окружения BOT_TOKEN не установлена!")
+
+SUPER_ADMIN_IDS = [923942388]  # Ваш ID
 DB_NAME = "poll_bot.db"
 
 NO_ACTIVE_POLL_MSG = "❌ Нет активного опроса."
@@ -90,7 +92,7 @@ def init_db():
 def get_db_connection():
     return sqlite3.connect(DB_NAME)
 
-# ---------- Работа с админами ----------
+# ---------- Админы ----------
 def is_super_admin(user_id: int) -> bool:
     return user_id in SUPER_ADMIN_IDS
 
@@ -126,7 +128,7 @@ def get_all_admins() -> List[Dict]:
         rows = cur.fetchall()
         return [{"user_id": r[0], "added_by": r[1], "added_at": r[2]} for r in rows]
 
-# ---------- Работа с пользователями ----------
+# ---------- Пользователи ----------
 def set_user_nickname(user_id: int, nickname: str) -> None:
     with get_db_connection() as conn:
         cur = conn.cursor()
@@ -146,7 +148,7 @@ def get_user_vote_count(user_id: int) -> int:
         cur.execute("SELECT COUNT(*) FROM votes WHERE user_id = ?", (user_id,))
         return cur.fetchone()[0]
 
-# ---------- Работа с опросами ----------
+# ---------- Опросы ----------
 def deactivate_all_polls() -> None:
     with get_db_connection() as conn:
         cur = conn.cursor()
@@ -263,60 +265,54 @@ def format_results_text(poll_id: int) -> str:
         lines.append(f"• {opt}:\n  {bar} {v} ({percent:.1f}%)")
     return "\n".join(lines)
 
-def generate_qr_code(data: str) -> BytesIO:
-    qr = qrcode.QRCode(box_size=8, border=2)
-    qr.add_data(data)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    buf = BytesIO()
-    img.save(buf, format='PNG')
-    buf.seek(0)
-    return buf
-
 # ==================== МЕНЮ И ПРОФИЛЬ ====================
+async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    nickname = get_user_nickname(user_id) or "Аноним"
+    vote_count = get_user_vote_count(user_id)
+    role = "Вожатый" if is_admin(user_id) else "Студент"
+    text = (f"👤 *Профиль*\n\n"
+            f"🔹 ID: `{user_id}`\n"
+            f"🔹 Ник: {nickname}\n"
+            f"🔹 Роль: {role}\n"
+            f"🔹 Голосов: {vote_count}")
+    await update.message.reply_text(text, parse_mode="Markdown")
+
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     keyboard = [
         [InlineKeyboardButton("🗳 Голосовать", callback_data="menu_vote")],
         [InlineKeyboardButton("📊 Результаты", callback_data="menu_results")],
-        [InlineKeyboardButton("📜 История опросов", callback_data="menu_history")],
-        [InlineKeyboardButton("✏️ Установить ник", callback_data="menu_setname")],
-        [InlineKeyboardButton("👤 Мой профиль", callback_data="menu_profile")]
+        [InlineKeyboardButton("📜 История", callback_data="menu_history")],
+        [InlineKeyboardButton("✏️ Ник", callback_data="menu_setname")],
+        [InlineKeyboardButton("👤 Профиль", callback_data="menu_profile")]
     ]
     if is_admin(user_id):
-        keyboard.append([InlineKeyboardButton("🆕 Создать опрос", callback_data="menu_new_poll")])
+        keyboard.append([InlineKeyboardButton("🆕 Новый опрос", callback_data="menu_new_poll")])
         keyboard.append([InlineKeyboardButton("🔒 Закрыть опрос", callback_data="menu_close_poll")])
     if is_super_admin(user_id):
-        keyboard.append([InlineKeyboardButton("👥 Управление админами", callback_data="menu_admins")])
+        keyboard.append([InlineKeyboardButton("👥 Админы", callback_data="menu_admins")])
     reply_markup = InlineKeyboardMarkup(keyboard)
-
-    # Если вызов из callback_query (например, кнопка "Назад"), то редактируем существующее сообщение
+    # Исправлено: если это callback_query, редактируем сообщение, иначе отправляем новое
     if update.callback_query:
         await update.callback_query.message.edit_text(
-            "🏠 *Главное меню*\nВыберите действие:",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
+            "🏠 *Главное меню*", reply_markup=reply_markup, parse_mode="Markdown"
         )
-    # Иначе отправляем новое сообщение
     else:
         await update.message.reply_text(
-            "🏠 *Главное меню*\nВыберите действие:",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
+            "🏠 *Главное меню*", reply_markup=reply_markup, parse_mode="Markdown"
         )
 
 async def show_admins_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     keyboard = [
-        [InlineKeyboardButton("➕ Добавить админа", callback_data="admin_add")],
-        [InlineKeyboardButton("➖ Удалить админа", callback_data="admin_remove")],
-        [InlineKeyboardButton("📋 Список админов", callback_data="admin_list")],
+        [InlineKeyboardButton("➕ Добавить", callback_data="admin_add")],
+        [InlineKeyboardButton("➖ Удалить", callback_data="admin_remove")],
+        [InlineKeyboardButton("📋 Список", callback_data="admin_list")],
         [InlineKeyboardButton("◀️ Назад", callback_data="menu_back")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.callback_query.message.edit_text(
-        "👥 *Управление администраторами*\nВыберите действие:",
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
+        "👥 *Управление админами*", reply_markup=reply_markup, parse_mode="Markdown"
     )
 
 async def show_poll_to_user(update: Update, context: ContextTypes.DEFAULT_TYPE, poll: Dict) -> None:
@@ -327,27 +323,15 @@ async def show_poll_to_user(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         if i+1 < len(opts):
             row.append(InlineKeyboardButton(opts[i+1]["text"], callback_data=f"vote_{poll['id']}_{opts[i+1]['id']}"))
         keyboard.append(row)
-    keyboard.append([InlineKeyboardButton("➕ Добавить свой вариант", callback_data=f"add_option_{poll['id']}")])
+    keyboard.append([InlineKeyboardButton("➕ Свой вариант", callback_data=f"add_option_{poll['id']}")])
     keyboard.append([InlineKeyboardButton("📊 Результаты", callback_data=f"results_{poll['id']}")])
-    keyboard.append([InlineKeyboardButton("◀️ Главное меню", callback_data="menu_back")])
+    keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="menu_back")])
     reply_markup = InlineKeyboardMarkup(keyboard)
-    text = f"🎯 *{poll['question']}*\n\nВыберите вариант или добавьте свой:"
+    text = f"🎯 *{poll['question']}*\n\nВыберите вариант:"
     if update.callback_query:
         await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode="Markdown")
     else:
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
-
-async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.effective_user.id
-    nickname = get_user_nickname(user_id) or "Аноним"
-    vote_count = get_user_vote_count(user_id)
-    role = "Вожатый" if is_admin(user_id) else "Студент"
-    text = (f"👤 *Мой профиль*\n\n"
-            f"🔹 ID: `{user_id}`\n"
-            f"🔹 Ник: {nickname}\n"
-            f"🔹 Роль: {role}\n"
-            f"🔹 Отдано голосов: {vote_count}")
-    await update.message.reply_text(text, parse_mode="Markdown")
 
 # ==================== ОБРАБОТЧИКИ КОМАНД ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -364,13 +348,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except (IndexError, ValueError):
             await update.message.reply_text("❌ Неверная ссылка.")
     else:
-        nickname = get_user_nickname(user_id)
-        msg = ("👋 Добро пожаловать в бот голосований!\n"
-               "Используйте /menu для навигации.")
-        if nickname:
-            await update.message.reply_text(f"👋 Привет, {nickname}!\n{msg}")
-        else:
-            await update.message.reply_text(msg)
+        await update.message.reply_text(
+            "👋 Добро пожаловать!\n/menu – главное меню\n/setname <ник> – установить имя"
+        )
         await show_main_menu(update, context)
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -381,12 +361,9 @@ async def setname(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not context.args:
         await update.message.reply_text("📝 Использование: /setname <ваш_ник>")
         return
-    nickname = " ".join(context.args).strip()
-    if len(nickname) > 30:
-        await update.message.reply_text("❌ Ник не должен превышать 30 символов.")
-        return
+    nickname = " ".join(context.args).strip()[:30]
     set_user_nickname(user_id, nickname)
-    await update.message.reply_text(f"✅ Ваш ник установлен: {nickname}")
+    await update.message.reply_text(f"✅ Ник установлен: {nickname}")
 
 async def vote_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     poll = get_active_poll()
@@ -406,7 +383,7 @@ async def results_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     history = get_poll_history()
     if not history:
-        await update.message.reply_text("📭 История опросов пуста.")
+        await update.message.reply_text("📭 История пуста.")
         return
     text = "📜 *История опросов:*\n\n"
     keyboard = []
@@ -415,29 +392,29 @@ async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         text += f"• *{p['question']}* (голосов: {p['votes']}, {date_str})\n"
         keyboard.append([InlineKeyboardButton(f"📊 {p['question'][:30]}", callback_data=f"show_poll_{p['id']}")])
     await update.message.reply_text(text, parse_mode="Markdown")
-    await update.message.reply_text("Нажмите на кнопку, чтобы увидеть результаты:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("Нажмите на кнопку:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# ---------- УПРАВЛЕНИЕ АДМИНАМИ ----------
+# ---------- АДМИН-КОМАНДЫ ----------
 async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     if not is_super_admin(user_id):
         await update.message.reply_text(PERMISSION_DENIED)
         return
     if not context.args:
-        await update.message.reply_text("📝 Использование: /add_admin <user_id>")
+        await update.message.reply_text("📝 /add_admin <user_id>")
         return
     try:
-        new_admin_id = int(context.args[0])
+        new_id = int(context.args[0])
     except ValueError:
         await update.message.reply_text("❌ ID должен быть числом.")
         return
-    if is_admin(new_admin_id):
-        await update.message.reply_text(f"⚠️ Пользователь {new_admin_id} уже является администратором.")
+    if is_admin(new_id):
+        await update.message.reply_text(f"⚠️ {new_id} уже админ.")
         return
-    if add_admin(new_admin_id, user_id):
-        await update.message.reply_text(f"✅ Пользователь {new_admin_id} добавлен в список вожатых.")
+    if add_admin(new_id, user_id):
+        await update.message.reply_text(f"✅ Админ {new_id} добавлен.")
     else:
-        await update.message.reply_text("❌ Не удалось добавить администратора.")
+        await update.message.reply_text("❌ Ошибка добавления.")
 
 async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
@@ -445,7 +422,7 @@ async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(PERMISSION_DENIED)
         return
     if not context.args:
-        await update.message.reply_text("📝 Использование: /remove_admin <user_id>")
+        await update.message.reply_text("📝 /remove_admin <user_id>")
         return
     try:
         admin_id = int(context.args[0])
@@ -453,12 +430,12 @@ async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("❌ ID должен быть числом.")
         return
     if admin_id in SUPER_ADMIN_IDS:
-        await update.message.reply_text("❌ Нельзя удалить главного администратора.")
+        await update.message.reply_text("❌ Нельзя удалить главного.")
         return
     if remove_admin(admin_id):
-        await update.message.reply_text(f"✅ Пользователь {admin_id} удалён из списка вожатых.")
+        await update.message.reply_text(f"✅ Админ {admin_id} удалён.")
     else:
-        await update.message.reply_text("❌ Пользователь не найден в списке администраторов.")
+        await update.message.reply_text("❌ Не найден.")
 
 async def list_admins_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
@@ -467,11 +444,11 @@ async def list_admins_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     admins = get_all_admins()
     if not admins:
-        await update.message.reply_text("📭 Список дополнительных администраторов пуст.")
+        await update.message.reply_text("📭 Список пуст.")
         return
-    text = "👥 *Список вожатых (добавленные):*\n\n"
+    text = "👥 *Вожатые:*\n"
     for a in admins:
-        text += f"• ID: `{a['user_id']}` (добавил: {a['added_by']}, {a['added_at'][:10]})\n"
+        text += f"• `{a['user_id']}` (добавлен {a['added_at'][:10]})\n"
     await update.message.reply_text(text, parse_mode="Markdown")
 
 # ---------- СОЗДАНИЕ ОПРОСА ----------
@@ -482,7 +459,7 @@ async def new_poll(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data["creating_poll"] = True
     context.user_data["poll_question"] = None
     context.user_data["poll_options"] = []
-    await update.message.reply_text("📝 Введите вопрос для опроса (одним сообщением):")
+    await update.message.reply_text("📝 Введите вопрос:")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = update.message.text.strip()
@@ -496,37 +473,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await _handle_poll_creation(update, context, text)
         return
 
-    await update.message.reply_text("Используйте /menu для навигации.")
-
 async def _handle_custom_option(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, user_id: int) -> None:
     poll_id = context.user_data.get("pending_poll_id")
     if not poll_id:
-        await update.message.reply_text("❌ Ошибка: опрос не найден.")
-        context.user_data.pop("waiting_for_custom_option", None)
+        await update.message.reply_text("❌ Ошибка.")
+        context.user_data.clear()
         return
     poll = get_poll_by_id(poll_id)
     if not poll or not poll["is_active"]:
-        await update.message.reply_text("❌ Опрос уже закрыт или не существует.")
-        context.user_data.pop("waiting_for_custom_option", None)
-        context.user_data.pop("pending_poll_id", None)
+        await update.message.reply_text("❌ Опрос закрыт.")
+        context.user_data.clear()
         return
     if len(text) > 100:
-        await update.message.reply_text("❌ Вариант слишком длинный (макс. 100 символов). Попробуйте снова.")
+        await update.message.reply_text("❌ Слишком длинный вариант.")
         return
-    existing = [opt["text"] for opt in poll["options"]]
-    if text in existing:
-        await update.message.reply_text("❌ Такой вариант уже есть. Вы можете проголосовать за него.")
+    if text in [opt["text"] for opt in poll["options"]]:
+        await update.message.reply_text("❌ Уже есть.")
         await show_poll_to_user(update, context, poll)
-        context.user_data.pop("waiting_for_custom_option", None)
-        context.user_data.pop("pending_poll_id", None)
+        context.user_data.clear()
         return
-    new_id = add_option_to_poll(poll_id, text, user_id)
-    if new_id is None:
-        await update.message.reply_text("❌ Не удалось добавить вариант.")
-    else:
-        await update.message.reply_text(f"✅ Вариант «{text}» добавлен! Теперь можно голосовать.")
-    context.user_data.pop("waiting_for_custom_option", None)
-    context.user_data.pop("pending_poll_id", None)
+    add_option_to_poll(poll_id, text, user_id)
+    await update.message.reply_text(f"✅ Вариант «{text}» добавлен!")
+    context.user_data.clear()
     updated_poll = get_active_poll()
     if updated_poll and updated_poll["id"] == poll_id:
         await show_poll_to_user(update, context, updated_poll)
@@ -537,44 +505,37 @@ async def _handle_poll_creation(update: Update, context: ContextTypes.DEFAULT_TY
     if context.user_data["poll_question"] is None:
         context.user_data["poll_question"] = text
         await update.message.reply_text(
-            "✅ Вопрос сохранён. Теперь вводите варианты ответов по одному.\n"
-            "Когда закончите, отправьте команду /done или /stop.\n"
-            "Если хотите, чтобы студенты сами добавляли варианты, сразу отправьте /done."
+            "✅ Вопрос сохранён. Вводите варианты по одному.\n/done – закончить"
         )
     else:
         if len(text) > 100:
-            await update.message.reply_text("❌ Вариант слишком длинный (макс. 100 символов).")
+            await update.message.reply_text("❌ Слишком длинный.")
             return
         context.user_data["poll_options"].append(text)
-        await update.message.reply_text(
-            f"✅ Вариант «{text}» добавлен. Введите следующий или отправьте /done для завершения."
-        )
+        await update.message.reply_text(f"✅ Вариант «{text}» добавлен. Ещё или /done")
 
 async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not context.user_data.get("creating_poll"):
-        await update.message.reply_text("❌ Вы не создаёте опрос. Используйте /new_poll для начала.")
+        await update.message.reply_text("❌ Нет активного создания.")
         return
     question = context.user_data.get("poll_question")
     options = context.user_data.get("poll_options", [])
     if not question:
-        await update.message.reply_text("❌ Ошибка: нет вопроса. Начните заново /new_poll")
+        await update.message.reply_text("❌ Нет вопроса.")
         context.user_data.clear()
         return
     try:
         poll_id = create_poll(question, update.effective_user.id, options)
         bot_info = await context.bot.get_me()
         deep_link = f"https://t.me/{bot_info.username}?start=poll_{poll_id}"
-        qr_image = generate_qr_code(deep_link)
         await update.message.reply_text(
-            f"✅ Опрос создан!\n🔗 Ссылка: {deep_link}\n"
-            "Теперь студенты могут добавлять свои варианты и голосовать."
+            f"✅ Опрос создан!\n🔗 {deep_link}\nТеперь студенты могут голосовать."
         )
-        await update.message.reply_photo(photo=qr_image, caption="📱 QR-код для быстрого доступа")
         poll = get_active_poll()
         if poll:
             await show_poll_to_user(update, context, poll)
     except Exception as e:
-        logger.error(f"Ошибка создания опроса: {e}")
+        logger.error(f"Ошибка: {e}")
         await update.message.reply_text(ERROR_OCCURRED)
     finally:
         context.user_data.clear()
@@ -582,16 +543,15 @@ async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if context.user_data.get("creating_poll"):
         context.user_data.clear()
-        await update.message.reply_text("❌ Создание опроса отменено.")
+        await update.message.reply_text("❌ Создание отменено.")
     elif context.user_data.get("waiting_for_custom_option"):
-        context.user_data.pop("waiting_for_custom_option", None)
-        context.user_data.pop("pending_poll_id", None)
-        await update.message.reply_text("❌ Добавление варианта отменено.")
+        context.user_data.clear()
+        await update.message.reply_text("❌ Добавление отменено.")
         poll = get_active_poll()
         if poll:
             await show_poll_to_user(update, context, poll)
     else:
-        await update.message.reply_text("❌ Нет активной операции для отмены.")
+        await update.message.reply_text("❌ Нет активной операции.")
 
 async def close_poll_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_admin(update.effective_user.id):
@@ -604,7 +564,6 @@ async def close_poll_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     close_poll(poll["id"])
     await update.message.reply_text(f"🔒 Опрос «{poll['question']}» закрыт.")
 
-# ---------- ДОБАВЛЕНИЕ СВОЕГО ВАРИАНТА ----------
 async def add_custom_option_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -613,16 +572,13 @@ async def add_custom_option_callback(update: Update, context: ContextTypes.DEFAU
         poll_id = int(data.split("_")[2])
         poll = get_poll_by_id(poll_id)
         if not poll or not poll["is_active"]:
-            await query.edit_message_text("❌ Опрос не активен или не найден.")
+            await query.edit_message_text("❌ Опрос не активен.")
             return
         context.user_data["waiting_for_custom_option"] = True
         context.user_data["pending_poll_id"] = poll_id
-        await query.edit_message_text(
-            "✏️ Введите текст вашего варианта (название песни).\n"
-            "Для отмены отправьте /cancel"
-        )
+        await query.edit_message_text("✏️ Введите свой вариант:\n/cancel – отмена")
 
-# ---------- ОБРАБОТЧИК КНОПОК ----------
+# ---------- CALLBACK-ОБРАБОТЧИКИ ----------
 async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -633,47 +589,42 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await show_main_menu(update, context)
     elif data == "menu_vote":
         poll = get_active_poll()
-        if not poll:
+        if poll:
+            await show_poll_to_user(update, context, poll)
+        else:
             await query.edit_message_text(NO_ACTIVE_POLL_MSG)
-            return
-        await show_poll_to_user(update, context, poll)
     elif data == "menu_results":
         poll = get_active_poll()
-        if not poll:
+        if poll:
+            text = format_results_text(poll["id"])
+            await query.edit_message_text(text, parse_mode="Markdown")
+        else:
             await query.edit_message_text(NO_ACTIVE_POLL_MSG)
-            return
-        text = format_results_text(poll["id"])
-        await query.edit_message_text(text, parse_mode="Markdown")
     elif data == "menu_history":
-        history = get_poll_history()
-        if not history:
-            await query.edit_message_text("📭 История опросов пуста.")
+        hist = get_poll_history()
+        if not hist:
+            await query.edit_message_text("📭 История пуста.")
             return
-        text = "📜 *История опросов:*\n\n"
+        text = "📜 *История:*\n"
         keyboard = []
-        for p in history:
-            date_str = p['created_at'][:10] if p['created_at'] else UNKNOWN_OPTION
-            text += f"• *{p['question']}* (голосов: {p['votes']}, {date_str})\n"
+        for p in hist:
+            text += f"• {p['question']} (голосов: {p['votes']}, {p['created_at'][:10]})\n"
             keyboard.append([InlineKeyboardButton(f"📊 {p['question'][:30]}", callback_data=f"show_poll_{p['id']}")])
         await query.edit_message_text(text, parse_mode="Markdown")
-        await query.message.reply_text("Нажмите на кнопку, чтобы увидеть результаты:", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.message.reply_text("Результаты:", reply_markup=InlineKeyboardMarkup(keyboard))
     elif data == "menu_setname":
-        await query.edit_message_text("📝 Используйте команду /setname <ваш_ник>")
+        await query.edit_message_text("📝 /setname <ник>")
     elif data == "menu_profile":
-        nickname = get_user_nickname(user_id) or "Аноним"
-        vote_count = get_user_vote_count(user_id)
+        nick = get_user_nickname(user_id) or "Аноним"
+        votes = get_user_vote_count(user_id)
         role = "Вожатый" if is_admin(user_id) else "Студент"
-        text = (f"👤 *Мой профиль*\n\n"
-                f"🔹 ID: `{user_id}`\n"
-                f"🔹 Ник: {nickname}\n"
-                f"🔹 Роль: {role}\n"
-                f"🔹 Отдано голосов: {vote_count}")
+        text = f"👤 *Профиль*\nID: `{user_id}`\nНик: {nick}\nРоль: {role}\nГолосов: {votes}"
         await query.edit_message_text(text, parse_mode="Markdown")
     elif data == "menu_new_poll":
         if not is_admin(user_id):
             await query.edit_message_text(PERMISSION_DENIED)
             return
-        await query.edit_message_text("📝 Используйте команду /new_poll для создания опроса.")
+        await query.edit_message_text("📝 Команда /new_poll")
     elif data == "menu_close_poll":
         if not is_admin(user_id):
             await query.edit_message_text(PERMISSION_DENIED)
@@ -683,24 +634,24 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             await query.edit_message_text(NO_ACTIVE_POLL_MSG)
             return
         close_poll(poll["id"])
-        await query.edit_message_text(f"🔒 Опрос «{poll['question']}» закрыт.")
+        await query.edit_message_text(f"🔒 Опрос закрыт.")
     elif data == "menu_admins":
         if not is_super_admin(user_id):
             await query.edit_message_text(PERMISSION_DENIED)
             return
         await show_admins_menu(update, context)
     elif data == "admin_add":
-        await query.edit_message_text("➕ Используйте команду /add_admin <user_id>")
+        await query.edit_message_text("📝 /add_admin <id>")
     elif data == "admin_remove":
-        await query.edit_message_text("➖ Используйте команду /remove_admin <user_id>")
+        await query.edit_message_text("📝 /remove_admin <id>")
     elif data == "admin_list":
         admins = get_all_admins()
         if not admins:
-            await query.edit_message_text("📭 Список дополнительных администраторов пуст.")
+            await query.edit_message_text("📭 Нет дополнительных.")
             return
-        text = "👥 *Список вожатых (добавленные):*\n\n"
+        text = "👥 *Вожатые:*\n"
         for a in admins:
-            text += f"• ID: `{a['user_id']}` (добавил: {a['added_by']}, {a['added_at'][:10]})\n"
+            text += f"• `{a['user_id']}` (добавлен {a['added_at'][:10]})\n"
         await query.edit_message_text(text, parse_mode="Markdown")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -711,29 +662,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if data.startswith("vote_"):
         await query.answer()
         try:
-            _, poll_id_str, option_id_str = data.split("_")
-            poll_id, option_id = int(poll_id_str), int(option_id_str)
+            _, pid, oid = data.split("_")
+            pid, oid = int(pid), int(oid)
         except ValueError:
-            await query.edit_message_text("❌ Ошибка формата.")
+            await query.edit_message_text("❌ Ошибка.")
             return
-        poll = get_poll_by_id(poll_id)
+        poll = get_poll_by_id(pid)
         if not poll or not poll["is_active"]:
             await query.edit_message_text("❌ Опрос неактивен.")
             return
-        nickname = get_user_nickname(user_id)
-        if cast_vote(poll_id, option_id, user_id, nickname):
-            chosen = next((opt["text"] for opt in poll["options"] if opt["id"] == option_id), UNKNOWN_OPTION)
-            await query.edit_message_text(f"✅ Вы проголосовали за «{chosen}»!\nИспользуйте /menu для возврата.")
+        nick = get_user_nickname(user_id)
+        if cast_vote(pid, oid, user_id, nick):
+            await query.edit_message_text("✅ Голос учтён! /menu")
         else:
-            await query.edit_message_text("❌ Ошибка голосования.")
+            await query.edit_message_text("❌ Ошибка.")
     elif data.startswith("results_"):
         await query.answer()
-        poll_id = int(data.split("_")[1])
-        await query.edit_message_text(format_results_text(poll_id), parse_mode="Markdown")
+        pid = int(data.split("_")[1])
+        await query.edit_message_text(format_results_text(pid), parse_mode="Markdown")
     elif data.startswith("show_poll_"):
         await query.answer()
-        poll_id = int(data.split("_")[2])
-        await query.edit_message_text(format_results_text(poll_id), parse_mode="Markdown")
+        pid = int(data.split("_")[2])
+        await query.edit_message_text(format_results_text(pid), parse_mode="Markdown")
     else:
         await menu_callback_handler(update, context)
 
@@ -768,14 +718,14 @@ def main():
     app.add_handler(CallbackQueryHandler(add_custom_option_callback, pattern="^add_option_"))
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    logger.info("🚀 Бот успешно запущен с QR‑кодом и меню!")
+    logger.info("🚀 Бот успешно запущен!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        logger.info("Бот остановлен пользователем.")
+        logger.info("Бот остановлен.")
     except Exception as e:
         logger.critical(f"Критическая ошибка: {e}")
         sys.exit(1)
