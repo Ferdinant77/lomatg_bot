@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
+import asyncio
+from aiohttp import web
 import logging
 import sqlite3
 import sys
@@ -738,44 +739,4 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await menu_callback_handler(update, context)
 
 # ==================== ЗАПУСК ====================
-def main():
-    init_db()
-    request = HTTPXRequest(
-        connect_timeout=30.0,
-        read_timeout=30.0,
-        write_timeout=30.0,
-        pool_timeout=30.0,
-    )
-    app = Application.builder().token(TOKEN).request(request).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("menu", menu_command))
-    app.add_handler(CommandHandler("help", menu_command))
-    app.add_handler(CommandHandler("setname", setname))
-    app.add_handler(CommandHandler("vote", vote_command))
-    app.add_handler(CommandHandler("results", results_command))
-    app.add_handler(CommandHandler("history", history_command))
-    app.add_handler(CommandHandler("close_poll", close_poll_command))
-    app.add_handler(CommandHandler("new_poll", new_poll))
-    app.add_handler(CommandHandler("done", done_command))
-    app.add_handler(CommandHandler("stop", done_command))
-    app.add_handler(CommandHandler("cancel", cancel_command))
-    app.add_handler(CommandHandler("add_admin", add_admin_command))
-    app.add_handler(CommandHandler("remove_admin", remove_admin_command))
-    app.add_handler(CommandHandler("list_admins", list_admins_command))
-
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.add_handler(CallbackQueryHandler(add_custom_option_callback, pattern="^add_option_"))
-    app.add_handler(CallbackQueryHandler(button_handler))
-
-    logger.info("🚀 Бот успешно запущен с QR‑кодом и меню!")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
-
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        logger.info("Бот остановлен пользователем.")
-    except Exception as e:
-        logger.critical(f"Критическая ошибка: {e}")
-        sys.exit(1)
+https://github.com/Ferdinant77/lomatg_bot
