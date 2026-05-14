@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import asyncio
-from aiohttp import web
 import logging
 import sqlite3
 import sys
@@ -20,6 +18,22 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 
+import asyncio
+import os
+from aiohttp import web
+
+async def health(request):
+    return web.Response(text="OK")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/health', health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"Health check server running on port {port}")
 # ==================== НАСТРОЙКИ ====================
 TOKEN = "8701551061:AAFNGmlPf4jHC_voQ8rTLbiqLP1VcwqK3SQ"
 SUPER_ADMIN_IDS = [923942388]
@@ -737,6 +751,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.edit_message_text(format_results_text(poll_id), parse_mode="Markdown")
     else:
         await menu_callback_handler(update, context)
+
+
+async def main():
+    init_db()
+    # ... создание app и добавление всех хендлеров ...
+    
+    await start_web_server()
+    await app.initialize()
+    await app.start()
+    asyncio.create_task(app.updater.start_polling())
+    await asyncio.Event().wait()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Бот остановлен")
+    except Exception as e:
+        print(f"Ошибка: {e}")
 
 # ==================== ЗАПУСК ====================
 https://github.com/Ferdinant77/lomatg_bot
